@@ -13,7 +13,6 @@ from django.views.generic import TemplateView
 from pytz import UTC
 from requests import HTTPError
 from ipware.ip import get_ip
-import waffle
 
 import edx_oauth2_provider
 from django.conf import settings
@@ -661,9 +660,8 @@ def dashboard(request):
     # Find programs associated with courses being displayed. This information
     # is passed in the template context to allow rendering of program-related
     # information on the dashboard.
-    use_catalog = waffle.switch_is_active('get_programs_from_catalog')
-    meter = programs_utils.ProgramProgressMeter(user, enrollments=course_enrollments, use_catalog=use_catalog)
-    programs_by_run = meter.engaged_programs(by_run=True)
+    meter = programs_utils.ProgramProgressMeter(user, enrollments=course_enrollments)
+    programs_by_course_run, __ = meter.programs_by_course_run()
 
     # Construct a dictionary of course mode information
     # used to render the course list.  We re-use the course modes dict
@@ -787,7 +785,9 @@ def dashboard(request):
         'order_history_list': order_history_list,
         'courses_requirements_not_met': courses_requirements_not_met,
         'nav_hidden': True,
-        'programs_by_run': programs_by_run,
+        # TODO: To the front end! Start by updating this context key.
+        # Add munging here to keep backend updates in a separate commit?
+        'programs_by_run': programs_by_course_run,
         'show_program_listing': ProgramsApiConfig.current().show_program_listing,
         'disable_courseware_js': True,
         'display_course_modes_on_dashboard': enable_verified_certificates and display_course_modes_on_dashboard,
