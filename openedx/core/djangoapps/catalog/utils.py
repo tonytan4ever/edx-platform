@@ -1,5 +1,6 @@
 """Helper functions for working with the catalog service."""
 from django.conf import settings
+from django.core.cache import cache
 from django.contrib.auth.models import User
 from edx_rest_api_client.client import EdxRestApiClient
 from opaque_keys.edx.keys import CourseKey
@@ -7,6 +8,7 @@ from opaque_keys.edx.keys import CourseKey
 from openedx.core.djangoapps.catalog.models import CatalogIntegration
 from openedx.core.lib.edx_api_utils import get_edx_api_data
 from openedx.core.lib.token_utils import JwtBuilder
+from xmodule.modulestore.django import modulestore
 
 
 def create_catalog_api_client(user, catalog_integration):
@@ -102,6 +104,45 @@ def get_program_types(user=None):  # pylint: disable=redefined-builtin
         return []
 
 
+def _get_program_instructors(courses, program_id):
+    """
+    Returns the list of instructor from cached if cache key exists otherwise
+    iterate over the courses and return all the instructors of each course run
+    """
+    catalog_integration = CatalogIntegration.current()
+    if catalog_integration.enabled:
+        cache_key = '{base}.programs.instructors.{program_id}'.format(
+            base=catalog_integration.CACHE_KEY,
+            program_id=program_id
+        )
+        instructors = cache.get(cache_key) or []
+        if instructors:
+            return instructors
+
+        module_store = modulestore()
+        for key in _get_all_course_run_keys(courses):
+            descriptor = module_store.get_course(key)
+            if descriptor and descriptor.instructor_info:
+                for instructor in descriptor.instructor_info.get("instructors", []):
+                    instructors.append(instructor)
+
+        cache.set(cache_key, instructors, catalog_integration.cache_ttl)
+        return instructors
+    else:
+        return []
+
+
+def _get_all_course_run_keys(courses):
+    """
+    Returns the course keys of all the course runs of a program.
+    """
+    keys = []
+    for course in courses:
+        for course_run in course.get("course_runs", []):
+            keys.append(CourseKey.from_string(course_run.get("key")))
+    return keys
+
+
 def get_active_programs_data(user=None, program_id=None):
     """
     This will return the program details with its corresponding program_type if program_id
@@ -115,6 +156,7 @@ def get_active_programs_data(user=None, program_id=None):
     program_types = {program_type["name"]: program_type for program_type in get_program_types(user)}
     # get_programs returns a dict when provided with the program_id parameter.
     if isinstance(programs, dict):
+        programs["instructors"] = _get_program_instructors(programs.get("courses", []), programs.get("uuid"))
         programs = [programs]
 
     for program in programs:
